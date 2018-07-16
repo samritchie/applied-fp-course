@@ -14,6 +14,7 @@ import           Data.Text                          (Text)
 import qualified Data.Text                          as Text
 
 import           Data.Time                          (getCurrentTime)
+import           Data.Bifunctor
 
 import           Database.SQLite.Simple             (Connection, Query (Query))
 import qualified Database.SQLite.Simple             as Sql
@@ -22,7 +23,8 @@ import qualified Database.SQLite.SimpleErrors       as Sql
 import           Database.SQLite.SimpleErrors.Types (SQLiteResponse)
 
 import           Level04.Types                      (Comment, CommentText,
-                                                     Error, Topic)
+                                                      Error(..), Topic, getTopic, mkTopic,
+                                                      getCommentText, fromDbComment)
 
 -- ------------------------------------------------------------------------|
 -- You'll need the documentation for sqlite-simple ready for this section! |
@@ -44,7 +46,7 @@ closeDB
   :: FirstAppDB
   -> IO ()
 closeDB =
-  error "closeDb not implemented"
+  Sql.close . dbConn
 
 -- Given a `FilePath` to our SQLite DB file, initialise the database and ensure
 -- our Table is there by running a query to create it, if it doesn't exist
@@ -53,7 +55,11 @@ initDB
   :: FilePath
   -> IO ( Either SQLiteResponse FirstAppDB )
 initDB fp =
-  error "initDb not implemented"
+  Sql.runDBAction $ 
+    do
+      conn <- Sql.open fp
+      Sql.execute_ conn createTableQ
+      return $ FirstAppDB conn
   where
   -- Query has an `IsString` instance so string literals like this can be
   -- converted into a `Query` type when the `OverloadedStrings` language
@@ -67,14 +73,14 @@ initDB fp =
 --
 -- To go from a DbComment to a Comment, we need to use ``fromDbComment`` that is
 -- defined in FirstApp.Types.
---
+
 -- HINT: You can use '?' or named place-holders as query parameters. Have a look
 -- at the section on parameter substitution in sqlite-simple's documentation.
 getComments
   :: FirstAppDB
   -> Topic
   -> IO (Either Error [Comment])
-getComments =
+getComments db t =
   let
     sql = "SELECT id,topic,comment,time FROM comments WHERE topic = ?"
   -- There are several possible implementations of this function. Particularly
@@ -82,34 +88,49 @@ getComments =
   -- cannot be converted to a Comment, or simply ignoring any DbComment that is
   -- not valid.
   in
-    error "getComments not implemented"
+    do 
+      r <- Sql.runDBAction $ Sql.query (dbConn db) sql (Sql.Only (getTopic t))
+      return $ case r of
+                Left _ -> Left DBError
+                Right ds -> sequence (fromDbComment <$> ds)
+    
 
 addCommentToTopic
   :: FirstAppDB
   -> Topic
   -> CommentText
   -> IO (Either Error ())
-addCommentToTopic =
+addCommentToTopic db t txt =
   let
     sql = "INSERT INTO comments (topic,comment,time) VALUES (?,?,?)"
   in
-    error "addCommentToTopic not implemented"
+    do
+      tm <- getCurrentTime
+      r <- Sql.runDBAction $ Sql.execute (dbConn db) sql (getTopic t, getCommentText txt, tm)
+      return $ first (const DBError) r
 
 getTopics
   :: FirstAppDB
   -> IO (Either Error [Topic])
-getTopics =
+getTopics db =
   let
     sql = "SELECT DISTINCT topic FROM comments"
   in
-    error "getTopics not implemented"
+    do 
+      r <- Sql.runDBAction $ Sql.query_ (dbConn db) sql
+      return $ case r of
+                Left _ -> Left DBError
+                Right ts -> sequence (mkTopic . Sql.fromOnly <$> ts)
 
 deleteTopic
   :: FirstAppDB
   -> Topic
   -> IO (Either Error ())
-deleteTopic =
+deleteTopic db t =
   let
     sql = "DELETE FROM comments WHERE topic = ?"
   in
-    error "deleteTopic not implemented"
+    do
+      tm <- getCurrentTime
+      r <- Sql.runDBAction $ Sql.execute (dbConn db) sql (Sql.Only (getTopic t))
+      return $ first (const DBError) r

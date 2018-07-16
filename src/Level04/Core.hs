@@ -23,6 +23,7 @@ import qualified Data.ByteString.Lazy.Char8         as LBS
 import           Data.Either                        (Either (Left, Right),
                                                      either)
 
+import           Data.Bifunctor
 import           Data.Semigroup                     ((<>))
 import           Data.Text                          (Text)
 import           Data.Text.Encoding                 (decodeUtf8)
@@ -32,10 +33,10 @@ import qualified Data.Aeson                         as A
 
 import           Database.SQLite.SimpleErrors.Types (SQLiteResponse)
 
-import           Level04.Conf                       (Conf, firstAppConfig)
+import           Level04.Conf                       (Conf (..), firstAppConfig)
 import qualified Level04.DB                         as DB
 import           Level04.Types                      (ContentType (JSON, PlainText),
-                                                     Error (EmptyCommentText, EmptyTopic, UnknownRoute),
+                                                     Error (EmptyCommentText, EmptyTopic, UnknownRoute, DBError),
                                                      RqType (AddRq, ListRq, ViewRq),
                                                      mkCommentText, mkTopic,
                                                      renderContentType)
@@ -48,7 +49,12 @@ data StartUpError
   deriving Show
 
 runApp :: IO ()
-runApp = error "runApp needs re-implementing"
+runApp = 
+  do
+    r <- prepareAppReqs
+    case r of
+      Left e -> ioError (userError $ show e)
+      Right db -> run 3000 (app db)
 
 -- We need to complete the following steps to prepare our app requirements:
 --
@@ -60,7 +66,9 @@ runApp = error "runApp needs re-implementing"
 prepareAppReqs
   :: IO ( Either StartUpError DB.FirstAppDB )
 prepareAppReqs =
-  error "prepareAppReqs not implemented"
+  do
+    let c = firstAppConfig
+    first DbInitErr <$> DB.initDB (dbFilePath c) 
 
 -- | Some helper functions to make our lives a little more DRY.
 mkResponse
@@ -128,12 +136,13 @@ handleRequest
   :: DB.FirstAppDB
   -> RqType
   -> IO (Either Error Response)
-handleRequest _db (AddRq _ _) =
-  (resp200 PlainText "Success" <$) <$> error "AddRq handler not implemented"
-handleRequest _db (ViewRq _)  =
-  error "ViewRq handler not implemented"
+handleRequest _db (AddRq t txt) =
+    (resp200 PlainText "Success" <$) <$> DB.addCommentToTopic _db t txt
+handleRequest _db (ViewRq t)  =
+  (resp200Json <$>) <$> DB.getComments _db t
+
 handleRequest _db ListRq      =
-  error "ListRq handler not implemented"
+  (resp200Json <$>) <$> DB.getTopics _db
 
 mkRequest
   :: Request
@@ -177,3 +186,5 @@ mkErrorResponse EmptyCommentText =
   resp400 PlainText "Empty Comment"
 mkErrorResponse EmptyTopic =
   resp400 PlainText "Empty Topic"
+mkErrorResponse DBError =
+  resp500 PlainText "Database Error"
