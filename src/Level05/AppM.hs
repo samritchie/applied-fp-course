@@ -10,7 +10,7 @@ import           Data.Text              (Text)
 
 import           Level05.Types          (Error)
 
-import           Data.Bifunctor         (first)
+import           Data.Bifunctor         (first, second, bimap)
 
 -- We're going to add a very useful abstraction to our application. We'll
 -- automate away the explicit error handling and inspection of our Either values
@@ -68,14 +68,20 @@ runAppM (AppM m) =
 
 instance Functor AppM where
   fmap :: (a -> b) -> AppM a -> AppM b
-  fmap = error "fmap for AppM not implemented"
+  fmap f (AppM m) = AppM $ second f <$> m
 
 instance Applicative AppM where
   pure :: a -> AppM a
-  pure  = error "pure for AppM not implemented"
+  pure v = AppM $ pure $ Right v
 
   (<*>) :: AppM (a -> b) -> AppM a -> AppM b
-  (<*>) = error "spaceship for AppM not implemented"
+  (<*>) (AppM f) (AppM v) = 
+    let 
+      toFn (Left e) = const $ Left e
+      toFn (Right fn) = Right . fn
+      fn = toFn <$> f
+    in
+      AppM $ fn <$> v
 
 instance Monad AppM where
   return :: a -> AppM a
